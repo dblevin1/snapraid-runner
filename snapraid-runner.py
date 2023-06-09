@@ -11,9 +11,11 @@ import time
 import traceback
 from collections import Counter, defaultdict
 from io import StringIO
+import requests
+import json
 
 # Global variables
-config = None
+config = {}
 email_log = None
 
 
@@ -116,12 +118,56 @@ def send_email(success):
     server.quit()
 
 
+def send_pushbullet(success):
+    if len(config["pushbullet"]["key"]) == 0:
+        logging.error("Failed to send pushbullet because api key is not set")
+        return
+    key = config["pushbullet"]["key"]
+
+    if success:
+        body = "SnapRAID job completed successfully:\n\n\n"
+    else:
+        body = "Error during SnapRAID job:\n\n\n"
+
+    log = email_log.getvalue()
+    maxsize = config['pushbullet'].get('maxsize', 500) * 1024
+    if maxsize and len(log) > maxsize:
+        cut_lines = log.count("\n", maxsize // 2, -maxsize // 2)
+        log = (
+            "NOTE: Log was too big for pushbullet and was shortened\n\n" +
+            log[:maxsize // 2] +
+            "[...]\n\n\n --- LOG WAS TOO BIG - {} LINES REMOVED --\n\n\n[...]".format(
+                cut_lines) +
+            log[-maxsize // 2:])
+    body += log
+    subject = config["pushbullet"]["subject"]
+    args = ['-u', f'"""{ key }"":"'
+           '-d', 'type="note"', '-d', f'body="{ body }"', '-d', f'title="{ subject }"'
+           'https://api.pushbullet.com/v2/pushes']
+    data = {"type": "note",
+            "title": subject,
+            "body": body}
+
+    session = requests.Session()
+    session.auth = (key, "")
+    session.headers.update({"Content-Type": "application/json"})
+    r = session.post('https://api.pushbullet.com/v2/pushes', data=json.dumps(data))
+    if r.status_code != requests.codes.ok:
+        raise Exception(f"Error calling pushbullet:{r.text}")
+    return
+
+
 def finish(is_success):
     if ("error", "success")[is_success] in config["email"]["sendon"]:
         try:
             send_email(is_success)
         except Exception:
             logging.exception("Failed to send email")
+    if ("error", "success")[is_success] in config["pushbullet"]["sendon"]:
+        try:
+            send_pushbullet(is_success)
+        except Exception:
+            logging.exception("Failed to send pushbullet")
     if is_success:
         logging.info("Run finished successfully")
     else:
@@ -133,7 +179,7 @@ def load_config(args):
     global config
     parser = configparser.RawConfigParser()
     parser.read(args.conf)
-    sections = ["snapraid", "logging", "email", "smtp", "scrub"]
+    sections = ["snapraid", "logging", "email", "smtp", "scrub", "pushbullet"]
     config = dict((x, defaultdict(lambda: "")) for x in sections)
     for section in parser.sections():
         for (k, v) in parser.items(section):
@@ -188,12 +234,12 @@ def setup_logger():
         file_logger.setFormatter(log_format)
         root_logger.addHandler(file_logger)
 
-    if config["email"]["sendon"]:
+    if config["email"]["sendon"] or config["pushbullet"]["sendon"]:
         global email_log
         email_log = StringIO()
         email_logger = logging.StreamHandler(email_log)
         email_logger.setFormatter(log_format)
-        if config["email"]["short"]:
+        if config["email"]["short"] or config["pushbullet"]["short"]:
             # Don't send programm stdout in email
             email_logger.setLevel(logging.INFO)
         root_logger.addHandler(email_logger)
@@ -243,15 +289,15 @@ def run():
     logging.info("Run started")
     logging.info("=" * 60)
 
-    if not os.path.isfile(config["snapraid"]["executable"]):
-        logging.error("The configured snapraid executable \"{}\" does not "
-                      "exist or is not a file".format(
-                          config["snapraid"]["executable"]))
-        finish(False)
-    if not os.path.isfile(config["snapraid"]["config"]):
-        logging.error("Snapraid config does not exist at " +
-                      config["snapraid"]["config"])
-        finish(False)
+    #if not os.path.isfile(config["snapraid"]["executable"]):
+    #    logging.error("The configured snapraid executable \"{}\" does not "
+    #                  "exist or is not a file".format(
+    #                      config["snapraid"]["executable"]))
+    #    finish(False)
+    #if not os.path.isfile(config["snapraid"]["config"]):
+    #    logging.error("Snapraid config does not exist at " +
+    #                  config["snapraid"]["config"])
+    #    finish(False)
 
     if config["snapraid"]["touch"]:
         logging.info("Running touch...")
