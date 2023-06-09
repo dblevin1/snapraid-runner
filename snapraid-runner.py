@@ -17,6 +17,7 @@ import json
 # Global variables
 config = {}
 email_log = None
+pushbullet_log = None
 
 
 def tee_log(infile, out_lines, log_level):
@@ -129,7 +130,7 @@ def send_pushbullet(success):
     else:
         body = "Error during SnapRAID job:\n\n\n"
 
-    log = email_log.getvalue()
+    log = pushbullet_log.getvalue()
     maxsize = config['pushbullet'].get('maxsize', 500) * 1024
     if maxsize and len(log) > maxsize:
         cut_lines = log.count("\n", maxsize // 2, -maxsize // 2)
@@ -200,6 +201,10 @@ def load_config(args):
     config["scrub"]["enabled"] = (config["scrub"]["enabled"].lower() == "true")
     config["email"]["short"] = (config["email"]["short"].lower() == "true")
     config["snapraid"]["touch"] = (config["snapraid"]["touch"].lower() == "true")
+    if 'short' not in config["pushbullet"]:
+        config["pushbullet"]["short"] = True
+    else:
+        config["pushbullet"]["short"] = (config["pushbullet"]["short"].lower() == "true")
 
     # Migration
     if config["scrub"]["percentage"]:
@@ -234,15 +239,24 @@ def setup_logger():
         file_logger.setFormatter(log_format)
         root_logger.addHandler(file_logger)
 
-    if config["email"]["sendon"] or config["pushbullet"]["sendon"]:
+    if config["email"]["sendon"]:
         global email_log
         email_log = StringIO()
         email_logger = logging.StreamHandler(email_log)
         email_logger.setFormatter(log_format)
-        if config["email"]["short"] or config["pushbullet"]["short"]:
+        if config["email"]["short"]:
             # Don't send programm stdout in email
             email_logger.setLevel(logging.INFO)
         root_logger.addHandler(email_logger)
+
+    if config["pushbullet"]["sendon"]:
+        global pushbullet_log
+        pushbullet_log = StringIO()
+        pushbullet_logger = logging.StreamHandler(pushbullet_log)
+        pushbullet_logger.setFormatter(log_format)
+        if config["pushbullet"]["short"]:
+            pushbullet_logger.setLevel(logging.INFO)
+        root_logger.addHandler(pushbullet_logger)
 
 
 def main():
