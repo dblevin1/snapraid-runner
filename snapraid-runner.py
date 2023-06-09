@@ -255,7 +255,8 @@ def setup_logger():
         pushbullet_logger = logging.StreamHandler(pushbullet_log)
         pushbullet_logger.setFormatter(log_format)
         if config["pushbullet"]["short"]:
-            pushbullet_logger.setLevel(logging.INFO)
+            # Dont send program INFO to pushbullet
+            pushbullet_logger.setLevel(logging.OUTERR)
         root_logger.addHandler(pushbullet_logger)
 
 
